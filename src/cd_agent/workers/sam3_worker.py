@@ -104,8 +104,9 @@ def main():
     parser.add_argument('--port', type=int, required=True)
     parser.add_argument('--run', default=os.environ.get('AGENT_RUN', str(Path(__file__).resolve().parents[3] / '.runtime/agent_run')))
     args = parser.parse_args()
-    sys.path[:0] = ['/guisongxia01/pangchao/wangyihan/Chang-Agent/third_party/OmniOVCD',
-                    '/guisongxia01/pangchao/wangyihan/Chang-Agent/probe']
+    repo_root = Path(__file__).resolve().parents[3]
+    sys.path[:0] = [str(repo_root / 'third_party/OmniOVCD'),
+                    str(Path(__file__).resolve().parents[1] / '_compat')]
     import sam3_tools
     segmenter = Segmenter(sam3_tools.build_processor(), sam3_tools, args.run)
     ThreadingHTTPServer(('127.0.0.1', args.port), handler(segmenter)).serve_forever()

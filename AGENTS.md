@@ -17,6 +17,10 @@
   - `scripts/`：长期复用的基础设施脚本（浏览器核验等；旧 `exp_loop/` 已由全局 `expctl` 替代，不再新增依赖）。
   - `configs/`：路径与实验配置 YAML。
 - **共享模型与数据**：所有模型和数据集通过本仓库 `models/`、`datasets/` 下的软链接统一指向 `/guisongxia01/pangchao/wangyihan/models` 与 `/guisongxia01/pangchao/wangyihan/datasets`；代码中统一经由 `cd_agent.paths` 或环境变量解析，禁止新增硬编码绝对路径。
+- **轻量验证门禁（提交代码 / 跑正式实验前必过）**：
+  - 仓库结构与卫生门禁：`python -B scripts/verify_repo.py`（检查单包边界、无硬编码路径、无违规追踪产物、软链接与核心导入）。
+  - 科研不变式与交付契约：`src/cd_agent/verify.py`（推理输入 GT 隔离 `EpisodeInput`、划分防泄露 `check_split_isolation`、诊断标签集合公理 `check_diagnostic_labels`、产物目录校验 `python -m cd_agent.verify run <run_dir>`）。
+  - 最小视觉证据包：`src/cd_agent/evidence.py`（自动抽取代表性高分/中分/高 FP/高 FN 样本生成离线审阅页 `index.html`）。
 - **旧仓库隔离**：原 `/guisongxia01/pangchao/wangyihan/wyh/CD-Agent` 与外部 `wyh/verifier-v1-pilot-20261117` 仅作为历史只读参考或既有数据来源；严禁把旧历史目录内容反向混入本仓库。
 
 ## 2. 开发时限、训评一体与 `expctl` 闭环规范

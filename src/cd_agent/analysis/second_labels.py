@@ -8,7 +8,8 @@ import json
 import numpy as np
 from PIL import Image
 
-DATASET = Path('/guisongxia01/pangchao/wangyihan/datasets/lim1/SECOND')
+from cd_agent.paths import dataset_path
+DATASET = dataset_path('SECOND')
 VALIDATION = Path('/guisongxia01/pangchao/wangyihan/Chang-Agent/outputs/CD_1016_probe/exp6/second_cv/verifier_val.txt')
 ENCODING = {'non-change': 0, 'low vegetation': 1, 'N.V.G surface': 2, 'tree': 3,
             'water': 4, 'building': 5, 'playground': 6}

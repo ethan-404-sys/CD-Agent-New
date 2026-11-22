@@ -21,3 +21,17 @@
 ```bash
 pip install --no-build-isolation --no-deps -e .
 ```
+
+## 验证底座（Verification Base）
+
+- 仓库结构与卫生检查（2 秒）：
+  ```bash
+  python -B scripts/verify_repo.py
+  ```
+- 正式实验目录交付校验：
+  ```bash
+  PYTHONPATH=src python -B -m cd_agent.verify run outputs/<track>/<run_name> --expected-count <N>
+  ```
+- 代码内复用：
+  - `cd_agent.verify`：`EpisodeInput`（推理 GT 物理隔离）、`check_split_isolation`、`check_diagnostic_labels`、`write_run_contract`、`verify_run_dir`
+  - `cd_agent.evidence`：`build_evidence_page`（自动生成 6–8 个代表性样本的离线可视化审阅页）
