@@ -1,0 +1,47 @@
+# Experiment outputs, runtime state, caches, and logs (NEVER commit into Git)
+outputs/*
+!outputs/README.md
+.runtime/
+third_party/
+
+# Symlinked shared models & datasets (keep READMEs tracked)
+models/*
+!models/README.md
+datasets/*
+!datasets/README.md
+
+# Local path/credential overrides
+configs/paths.local.yaml
+.env
+*.env
+
+# Python & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Large binary/media/log artifacts accidentally created outside outputs/
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.npz
+*.npy
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.zip
+*.tar
+*.tar.gz
+*.out
+*.err
+*.log
+*.bak*
+.DS_Store

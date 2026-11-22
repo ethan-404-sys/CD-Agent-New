@@ -1,0 +1,90 @@
+{
+  "1": {
+    "vocabulary": [
+      "background,tree,forest",
+      "low vegetation"
+    ],
+    "points_per_side": 32,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 145,
+    "is_instance_class": false,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/second/sam_dinov2_segearth-ov_low-vegetation.py"
+  },
+  "2": {
+    "vocabulary": [
+      "background,cropland,grass,tree,forest,building,sports field,water",
+      "ground"
+    ],
+    "points_per_side": 32,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 145,
+    "is_instance_class": false,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/second/sam_dinov2_segearth-ov_non-veg-ground-surface.py"
+  },
+  "3": {
+    "vocabulary": [
+      "background,ground,bareland,water,cropland,building,sports field,grass",
+      "tree,forest"
+    ],
+    "points_per_side": 32,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 145,
+    "is_instance_class": false,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/second/sam_dinov2_segearth-ov_tree.py"
+  },
+  "4": {
+    "vocabulary": [
+      "background,cropland,ground,tree,forest,bareland,barren,pavement,road,parking lot,soil,building,sports field,non-vegetated ground surface",
+      "water,river,pond,sea"
+    ],
+    "points_per_side": 16,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 135,
+    "is_instance_class": false,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/second/sam_dinov2_segearth-ov_water.py"
+  },
+  "5": {
+    "vocabulary": [
+      "background",
+      "building"
+    ],
+    "points_per_side": 32,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 135,
+    "is_instance_class": false,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/second/sam_dinov2_segearth-ov_building.py"
+  },
+  "6": {
+    "vocabulary": [
+      "background,ground",
+      "sports field"
+    ],
+    "points_per_side": 32,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 135,
+    "is_instance_class": false,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/second/sam_dinov2_segearth-ov_playground.py"
+  },
+  "LEVIR-CD": {
+    "vocabulary": [
+      "background",
+      "building"
+    ],
+    "points_per_side": 32,
+    "identifier_resize": 448,
+    "change_confidence_threshold": 145,
+    "is_instance_class": true,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/levircd/sam_dinov2_segearth-ov.py"
+  },
+  "WHU-CD": {
+    "vocabulary": [
+      "background",
+      "building"
+    ],
+    "points_per_side": 8,
+    "identifier_resize": 224,
+    "change_confidence_threshold": 125,
+    "is_instance_class": true,
+    "official_script": "https://github.com/likyoo/DynamicEarth/blob/main/eval/whucd/sam_dinov2_segearth-ov.py"
+  }
+}
