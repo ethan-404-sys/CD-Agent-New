@@ -14,16 +14,16 @@
   - `src/cd_agent/_compat/`：从早期原型收拢的极简底层辅助模块（不继续往里堆新代码）。
 - **实验与脚本隔离**：
   - `experiments/<track>/`：按研究方向组织的实验入口与 Slurm 脚本（`t3_visual_ref/`、`multimodal_probe/`、`verifier_init_masks/`、`verifier_diag/`、`closed_loop/`）；禁止把一次性实验/分析脚本塞进 `src/cd_agent/`。
-  - `scripts/`：长期复用的基础设施脚本（`exp_loop/`、浏览器核验等）。
+  - `scripts/`：长期复用的基础设施脚本（浏览器核验等；旧 `exp_loop/` 已由全局 `expctl` 替代，不再新增依赖）。
   - `configs/`：路径与实验配置 YAML。
 - **共享模型与数据**：所有模型和数据集通过本仓库 `models/`、`datasets/` 下的软链接统一指向 `/guisongxia01/pangchao/wangyihan/models` 与 `/guisongxia01/pangchao/wangyihan/datasets`；代码中统一经由 `cd_agent.paths` 或环境变量解析，禁止新增硬编码绝对路径。
 - **旧仓库隔离**：原 `/guisongxia01/pangchao/wangyihan/wyh/CD-Agent` 与外部 `wyh/verifier-v1-pilot-20261117` 仅作为历史只读参考或既有数据来源；严禁把旧历史目录内容反向混入本仓库。
 
-## 2. 开发时限、训评一体与 `exp-loop` 闭环规范
+## 2. 开发时限、训评一体与 `expctl` 闭环规范
 - **耗时口径拆分（仅限前置开发）**：单次主动开发 **上限 ≤ 1 小时**，仅约束必要的代码编写、极小样本冒烟调通与 Slurm 提交准备；Slurm 排队及计算节点实际运行耗时**不计入**该时限。严禁为卡 1 小时而缩减已确定的训练 Epoch、样本量或评测规模。
 - **严格锁定当轮范围**：仅执行当前 Prompt 明确要求的单一子任务。严禁擅自扩充消融实验、重构无关代码或提前启动未授权的大规模在线评测。
 - **训评连续绑定（严禁只训不测）**：凡涉及模型训练，正式 Slurm 作业必须将 **`模型训练 → 权重落盘 → 标准验证/测试集测评出表` 串联为单次连续流水线**。正式提交前先通过 Slurm 用 1～2 个训练 batch 与极小评测样本跑通全链路；Smoke Test 不保留 checkpoint。
-- **`exp-loop` Hook 唤醒接力**：长耗时实验提交后交由 `scripts/exp_loop/` 监听，记录 Job ID、配置与输出目录，并确认结束唤醒已实际注册。
+- **`expctl` 异步提交与唤醒接力**：长耗时实验统一通过 `/persist_data/home/guisongxia/bin/expctl submit --script <sbatch> --name <名称> --on-success "<说明>" --on-fail "<说明>"` 提交（Subagent 附带 `--submitted-by subagent` 并立即返回摘要；短验证 smoke test 可直接 `sbatch`），严禁阻塞轮询 `squeue`/`sacct`。主 Agent 拿到 `slurm_job_id`/`ticket_id` 后即刻汇报并结束回合；收到 `[EXPCTL_WAKE <event_id>]` 唤醒后先执行 `expctl ack <event_id>` 检查退出状态、日志尾部与指标再继续收尾。
 - **卡壳即停与直接暴露真问题**：遇到需求歧义、数据异常，或同一报错连续 **2 次修复尝试**仍未解决时暂停汇报。严禁添加未经要求的兜底回滚补丁，严禁对真值（GT）做人工合成扰动，严禁用旧缓存替代真实运行。
 - **探查未知体量的数据目录**：先看条目总数，超过 2000 条的子集严禁全量读图解码，像素级快检一律随机抽样 500 条封顶。
 
