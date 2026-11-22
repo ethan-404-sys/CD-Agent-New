@@ -2,6 +2,7 @@
 outputs/*
 !outputs/README.md
 .runtime/
+.expctl-receipts/
 third_party/
 
 # Symlinked shared models & datasets (keep READMEs tracked)
