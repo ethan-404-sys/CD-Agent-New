@@ -9,7 +9,7 @@
 - `configs/`：路径与实验配置
 - `scripts/`：`exp_loop/` 与浏览器检查等复用脚本
 - `tests/`：核心单元测试
-- `docs/`：活跃文档（`CURRENT_STATE.md`、`INITIAL_MASKS.md`、`T32_DEV32.md`、`MIGRATION.md`）
+- `docs/`：活跃文档（`CURRENT_STATE.md`、`T32_DEV32.md`、`MIGRATION.md`）
 - `models/`、`datasets/`：指向 `/guisongxia01/pangchao/wangyihan/{models,datasets}` 的本地软链接（不入 Git）
 - `third_party/`：无 `.git` 的干净第三方参考代码副本（不入 Git）
 - `outputs/`、`.runtime/`：正式实验产物与临时运行态（不入 Git）

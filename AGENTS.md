@@ -45,6 +45,7 @@
 - **产物落盘**：正式实验数据、权重、评测 JSON、可视化 HTML 与日志统一写入 `outputs/<track>/<YYYYMMDD>_<任务名>/`（日志放其下 `logs/`）；冒烟测试统一放 `.runtime/smoke/<任务名>/`，验证后清理。
 - **极简忠实结项**：每次任务闭环输出 **≤ 25 行中文简报**：代码/配置改动、训练收敛与核心指标、产物路径、异常或待决策事项、Subagent 及 Slurm 作业实际状态。
 
-## 5. 主 Agent 与 Subagent 协作
-- 需要派生时，主 Agent 负责拆解、协调、审核证据与汇报；Subagent 负责具体实现、实验或分析。同时执行工作的 Subagent 最多 4 个。
-- 每次阶段汇报列出各 Subagent 分工及状态与 Slurm 作业状态；未派生时写「本阶段无 Subagent」，无后台作业时写「无运行或排队作业」。
+## 5. 主 Agent 与 Codex 后端 / Subagent 协作
+- **前后台分工**：前台主 Agent 负责需求对齐、架构边界、拆解窄任务单、验收 diff/门禁/可视化证据并向用户汇报；具体代码编写、数据准备、模型实现与实验提交优先通过全局技能 `codex-backend`（`~/.gemini/config/skills/codex-backend/`）调度 Ethan 的 Codex（`gpt-6.2-sol`，`high` + `fast`，最多 **3 个并发**）执行。
+- **交卷门禁**：Codex 后端交卷前必须自跑 `python -B scripts/verify_repo.py` 及任务单指定校验；前台验收通过后再向用户汇报，未通过直接 `resume` 打回修复。
+- **阶段汇报**：每次阶段汇报列出本阶段各后端任务 / Subagent 分工及状态与 Slurm 作业状态；未派生时写「本阶段无 Subagent / 后端任务」，无后台作业时写「无运行或排队作业」。

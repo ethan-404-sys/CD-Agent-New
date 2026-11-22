@@ -9,7 +9,7 @@
    - `experiments/t3_visual_ref/`：T3.2 Dev-32 作业脚本（已切换至 `PYTHONPATH=src`、`python -m cd_agent.t32_dev32` 与 `outputs/t3_visual_ref/t32_dev32`）。
    - `experiments/verifier_init_masks/`：统一初始掩码 CLI、实现与 4 个 Slurm 脚本（默认输出指向本仓库 `outputs/verifier_init_masks/verifier_v1_600`，避免误覆写旧目录在跑产物；如需指向旧目录可通过 `VERIFIER_DATASET_OUT` 显式指定）。
 3. **基础设施与核心单测**：`scripts/exp_loop/`、`scripts/browser_checks/` 与 22 份核心单测 + `tests/test_paths_and_layout.py`。
-4. **活跃文档**：`docs/CURRENT_STATE.md`、`docs/INITIAL_MASKS.md`、`docs/T32_DEV32.md`。
+4. **活跃文档**：`docs/CURRENT_STATE.md`、`docs/T32_DEV32.md`。
 5. **非 Git 资产**：
    - `models/`：软链接至 `/guisongxia01/pangchao/wangyihan/models/` 下的 14 个遥感/视觉相关模型。
    - `datasets/`：软链接至 `/guisongxia01/pangchao/wangyihan/datasets/` 下的 9 个遥感变化检测数据集（含 `lim1/` 中的 `SECOND`、`WHU-CD`、`SYSU-CD`）。
