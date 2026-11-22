@@ -1,0 +1,16 @@
+{
+  "dataset": "SECOND",
+  "source_index": "datasets/SECOND/dataset_index.json",
+  "seed": 20261122,
+  "algorithm": "Enumerate official train IDs in numeric order; shuffle with random.Random(seed).shuffle; use first 400 for validation and the remaining 2568 for training. Preserve that order in both files. Keep official test IDs in numeric order.",
+  "source_unit": "Complete dual-temporal pair; IDs are original PNG basenames",
+  "official_counts": {
+    "train": 2968,
+    "test": 1694
+  },
+  "counts": {
+    "train": 2568,
+    "val": 400,
+    "test": 1694
+  }
+}

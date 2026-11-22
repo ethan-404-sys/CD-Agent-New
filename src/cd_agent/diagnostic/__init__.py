@@ -1,1 +1,1 @@
-"""Direction 3 Step 1: Multi-task spatial error diagnostic model (FP / FN / Edge Error)."""
+"""Direction-aware SAM 3 diagnostic models (submodules are imported on demand)."""
