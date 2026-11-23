@@ -87,7 +87,7 @@ def select_evidence_cases(
 
 
 def _error_overlay(base_rgb: np.ndarray, pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
-    """Overlay TP (green), FP (red), FN (blue) onto T2 RGB."""
+    """Overlay TP (green), FP (red), FN (blue) onto a temporal RGB image."""
     out = base_rgb.astype(np.float32) * 0.55
     tp = pred & gt
     fp = pred & ~gt
@@ -169,9 +169,13 @@ def build_evidence_page(
         _save_thumb(item['_gt'].astype(np.uint8) * 255, assets / f'{prefix}_gt.png', max_side)
         panels.append(('GT', f'assets/{prefix}_gt.png'))
 
-        overlay = _error_overlay(item['_t2'], item['_pred'], item['_gt'])
-        _save_thumb(overlay, assets / f'{prefix}_err.png', max_side)
-        panels.append(('Error (TP=G FP=R FN=B)', f'assets/{prefix}_err.png'))
+        overlay_t1 = _error_overlay(item['_t1'], item['_pred'], item['_gt'])
+        _save_thumb(overlay_t1, assets / f'{prefix}_err_t1.png', max_side)
+        panels.append(('Err@T1 (TP=G FP=R FN=B)', f'assets/{prefix}_err_t1.png'))
+
+        overlay_t2 = _error_overlay(item['_t2'], item['_pred'], item['_gt'])
+        _save_thumb(overlay_t2, assets / f'{prefix}_err_t2.png', max_side)
+        panels.append(('Err@T2 (TP=G FP=R FN=B)', f'assets/{prefix}_err_t2.png'))
 
         note = str(item.get('summary') or item.get('instruction') or '')
         panel_tags = ''.join(

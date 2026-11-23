@@ -18,6 +18,7 @@ profile=full
 split=
 shard=0
 num_shards=1
+class_mode=clear4
 ckpt=()
 while (( $# )); do
     case "$1" in
@@ -25,10 +26,15 @@ while (( $# )); do
         --split) split=${2:?}; shift 2 ;;
         --shard) shard=${2:?}; shift 2 ;;
         --num-shards) num_shards=${2:?}; shift 2 ;;
+        --class-mode) class_mode=${2:?}; shift 2 ;;
         --scannet-ckpt) ckpt=(--scannet-ckpt "${2:?}"); shift 2 ;;
         *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
     esac
 done
+if [[ $class_mode != clear4 && $class_mode != all6 ]]; then
+    printf 'Unknown class mode: %s\n' "$class_mode" >&2
+    exit 2
+fi
 if [[ ! $shard =~ ^(0|[1-9][0-9]*)$ || ! $num_shards =~ ^[1-9][0-9]*$ ]] ||
    (( shard >= num_shards || num_shards > 400 )); then
     printf 'Need 0 <= --shard < --num-shards <= 400\n' >&2
@@ -47,11 +53,17 @@ case "$profile" in
         ;;
     pilot64)
         out="$repo/outputs/verifier_diag/second_pilot64"
+        if [[ $class_mode == all6 ]]; then
+            out="$repo/outputs/verifier_diag/second_pilot64_6cls"
+        fi
         split=train
         limit=(--limit 64)
         ;;
     full)
         out="$repo/outputs/verifier_diag/second_full_v1"
+        if [[ $class_mode == all6 ]]; then
+            out="$repo/outputs/verifier_diag/second_full_6cls"
+        fi
         if (( num_shards > 1 )); then
             printf -v shard_dir 'shard-%03d-of-%03d' "$shard" "$num_shards"
             out="$out/$shard_dir"
@@ -99,7 +111,7 @@ for split in "${splits[@]}"; do
         run="$out/$split"
     fi
     "$cpu" -B -m "$runner" prepare --out "$run" --split "$split" \
-        --shard "$shard" --num-shards "$num_shards" "${limit[@]}"
+        --shard "$shard" --num-shards "$num_shards" --class-mode "$class_mode" "${limit[@]}"
     "$cpu" -B -m "$runner" infer --out "$run" --method scannet "${ckpt[@]}"
     "$ovcd" -B -m "$runner" infer --out "$run" --method omniovcd
     "$ovcd" -B -m "$runner" infer --out "$run" --method rea_ovcd

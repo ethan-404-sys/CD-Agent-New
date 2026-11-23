@@ -133,7 +133,11 @@ class VerifyBaseTest(unittest.TestCase):
             sel = json.loads((out / 'selection.json').read_text(encoding='utf-8'))
             self.assertGreaterEqual(len(sel), 4)
             self.assertEqual(len(sel), len({r['id'] for r in sel}))
-            self.assertTrue(any((out / 'assets').glob('*.png')))
+            self.assertTrue(any((out / 'assets').glob('*_err_t1.png')))
+            self.assertTrue(any((out / 'assets').glob('*_err_t2.png')))
+            html = page.read_text(encoding='utf-8')
+            self.assertIn('Err@T1', html)
+            self.assertIn('Err@T2', html)
             picked = select_evidence_cases([{'id': 'a', 'f1': 0.9, 'fp': 1, 'fn': 1}], per_bucket=2)
             self.assertEqual(len(picked), 1)
 

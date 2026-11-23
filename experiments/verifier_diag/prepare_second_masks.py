@@ -28,6 +28,9 @@ METHODS = ('scannet', 'omniovcd', 'rea_ovcd')
 CLASS_NAMES = ('unchanged', 'low vegetation', 'non-vegetated ground', 'trees',
                'water bodies', 'buildings', 'sports fields')
 CLEAR = (3, 4, 5, 6)
+ALL_CLASSES = (1, 2, 3, 4, 5, 6)
+CLASS_MODES = {'clear4': CLEAR, 'all6': ALL_CLASSES}
+DEFAULT_CLASS_MODE = 'clear4'
 TASK_TYPES = ('related', 'into', 'outof', 'transition')
 MIN_AREA, IGNORE_RADIUS = 16, 2
 TRANSITION_COVERAGE, MAX_TRANSITION_FRAGMENTS = .95, 1
@@ -52,10 +55,14 @@ def frozen_splits(directory: Path = SPLIT_DIR) -> dict[str, list[str]]:
     return splits
 
 
-def task_catalog() -> list[dict]:
+def task_catalog(class_mode: str = DEFAULT_CLASS_MODE) -> list[dict]:
     """Enumerate without labels; eligibility/transition completeness is measured in export."""
+    if class_mode not in CLASS_MODES:
+        raise ValueError(f'Unknown SECOND class_mode: {class_mode}')
+    active = CLASS_MODES[class_mode]
+    active_set = set(active)
     tasks = []
-    for c in CLEAR:
+    for c in active:
         name = CLASS_NAMES[c]
         prompts = (f'Find all changes involving {name}.',
                    f'Find areas that became {name}.',
@@ -65,7 +72,7 @@ def task_catalog() -> list[dict]:
                               instruction=prompt, prompt_en=prompt))
     for a in range(1, len(CLASS_NAMES)):
         for b in range(1, len(CLASS_NAMES)):
-            if a == b or not ({a, b} & set(CLEAR)):
+            if a == b or not ({a, b} & active_set):
                 continue
             prompt = f'Find areas that changed from {CLASS_NAMES[a]} to {CLASS_NAMES[b]}.'
             tasks.append(dict(id=f'transition_{a}_{b}', task_type='transition',
@@ -110,14 +117,15 @@ def complete_transition(raw: np.ndarray, proxy: np.ndarray) -> bool:
 
 
 def eligible_targets(change: np.ndarray, t1: np.ndarray, t2: np.ndarray, tasks: list[dict]) -> dict:
-    """Use the earlier pilot's four clear classes and C-domain entity proxy."""
+    """Compile eligible targets with C-domain entity proxy for transitions."""
     targets = {}
     for task in tasks:
         p = task['task_params']
         raw = compile_target(change, t1, t2, task)
         if task['task_type'] == 'transition':
             a, b = p['source_class'], p['target_class']
-            proxy = change & ((t2 == b) if b in CLEAR else (t1 == a))
+            # Prefer a clear-class endpoint as entity proxy; for 1<->2 use destination b.
+            proxy = change & ((t2 == b) if (b in CLEAR or a not in CLEAR) else (t1 == a))
             if not complete_transition(raw, proxy):
                 continue
         else:
@@ -141,11 +149,14 @@ def write_json(path: Path, value) -> None:
 
 
 def prepare(out: Path, split: str, *, limit: int | None = None, shard: int = 0,
-            num_shards: int = 1, dataset: Path | None = None) -> dict:
+            num_shards: int = 1, dataset: Path | None = None,
+            class_mode: str = DEFAULT_CLASS_MODE) -> dict:
     if not 0 <= shard < num_shards:
         raise ValueError('Expected 0 <= shard < num_shards')
     if limit is not None and limit < 1:
         raise ValueError('limit must be positive')
+    if class_mode not in CLASS_MODES:
+        raise ValueError(f'Unknown SECOND class_mode: {class_mode}')
     names = frozen_splits()[split][shard::num_shards][:limit]
     if not names:
         raise ValueError('The requested SECOND shard/limit has no pairs')
@@ -157,7 +168,9 @@ def prepare(out: Path, split: str, *, limit: int | None = None, shard: int = 0,
             if not Path(pair[key]).is_file():
                 raise FileNotFoundError(pair[key])
     plan = dict(version=VERSION, split=split, shard=shard, num_shards=num_shards,
-                tasks=task_catalog(), pairs=pairs)
+                tasks=task_catalog(class_mode), pairs=pairs)
+    if class_mode != DEFAULT_CLASS_MODE:
+        plan['class_mode'] = class_mode
     path = out / PLAN
     if path.exists():
         if read_json(path) != plan:
@@ -169,7 +182,8 @@ def prepare(out: Path, split: str, *, limit: int | None = None, shard: int = 0,
 
 def load_plan(out: Path) -> dict:
     plan = read_json(out / PLAN)
-    if plan.get('version') != VERSION or plan.get('tasks') != task_catalog():
+    class_mode = plan.get('class_mode', DEFAULT_CLASS_MODE)
+    if plan.get('version') != VERSION or class_mode not in CLASS_MODES or plan.get('tasks') != task_catalog(class_mode):
         raise ValueError('Unknown inference plan version or unexpected task fields')
     splits = frozen_splits()
     shard, num_shards = plan['shard'], plan['num_shards']
@@ -524,6 +538,7 @@ def export(out: Path) -> dict:
     verify.write_run_contract(
         out, track='verifier_diag', run_name=out.name, metrics=metrics,
         config=dict(split=plan['split'], shard=plan['shard'], num_shards=plan['num_shards'],
+                    class_mode=plan.get('class_mode', DEFAULT_CLASS_MODE),
                     task_catalog_version=VERSION, generators=settings, min_area=MIN_AREA,
                     ignore_radius=IGNORE_RADIUS, transition_coverage=TRANSITION_COVERAGE,
                     max_transition_fragments=MAX_TRANSITION_FRAGMENTS,
@@ -547,6 +562,7 @@ def main() -> None:
     prep.add_argument('--limit', type=positive)
     prep.add_argument('--shard', type=int, default=0)
     prep.add_argument('--num-shards', type=positive, default=1)
+    prep.add_argument('--class-mode', choices=tuple(CLASS_MODES), default=DEFAULT_CLASS_MODE)
     inference = sub.add_parser('infer', help='Generate/resume task masks inside a GPU Slurm job')
     inference.add_argument('--method', choices=METHODS, required=True)
     inference.add_argument('--limit', type=positive)
@@ -557,8 +573,9 @@ def main() -> None:
     args = parser.parse_args()
     out = args.out.absolute()
     if args.stage == 'prepare':
-        plan = prepare(out, args.split, limit=args.limit, shard=args.shard, num_shards=args.num_shards)
-        print(f'Frozen {len(plan["pairs"])} {args.split} pairs and {len(plan["tasks"])} tasks in {out / PLAN}')
+        plan = prepare(out, args.split, limit=args.limit, shard=args.shard, num_shards=args.num_shards,
+                       class_mode=args.class_mode)
+        print(f'Frozen {len(plan["pairs"])} {args.split} pairs and {len(plan["tasks"])} tasks ({args.class_mode}) in {out / PLAN}')
     elif args.stage == 'infer':
         infer(out, args.method, limit=args.limit, scannet_ckpt=args.scannet_ckpt)
     else:

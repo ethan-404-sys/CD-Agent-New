@@ -58,6 +58,38 @@ class SecondDataTest(unittest.TestCase):
         np.testing.assert_array_equal(targets['outof_3'], targets['transition_3_5'])
         self.assertFalse(targets['outof_5'].any())
 
+    def test_all6_task_catalog_and_targets(self):
+        t1 = np.zeros((32, 32), dtype=np.uint8)
+        t2 = t1.copy()
+        t1[3:13, 3:13], t2[3:13, 3:13] = 1, 2
+        t1[18:28, 18:28], t2[18:28, 18:28] = 2, 5
+        change = t1 != t2
+        tasks = second.task_catalog('all6')
+        self.assertEqual(len(tasks), 48)
+        ids = {task['id'] for task in tasks}
+        self.assertIn('related_1', ids)
+        self.assertIn('related_2', ids)
+        self.assertIn('transition_1_2', ids)
+        self.assertIn('transition_2_1', ids)
+        self.assertEqual({task['task_params']['class_id'] for task in tasks
+                          if task['task_type'] != 'transition'}, {1, 2, 3, 4, 5, 6})
+        targets = second.eligible_targets(change, t1, t2, tasks)
+        self.assertEqual({key for key in targets if key.startswith('transition')},
+                         {'transition_1_2', 'transition_2_5'})
+        np.testing.assert_array_equal(targets['outof_1'], targets['transition_1_2'])
+        np.testing.assert_array_equal(targets['into_2'], targets['transition_1_2'])
+        names = second.frozen_splits()['val']
+        with tempfile.TemporaryDirectory() as tmp:
+            dataset = Path(tmp) / 'dataset'
+            out = Path(tmp) / 'run6'
+            for folder in ('img1', 'img2'):
+                (dataset / folder).mkdir(parents=True)
+                Image.new('RGB', (32, 32)).save(dataset / folder / names[0])
+            plan = second.prepare(out, 'val', dataset=dataset, limit=1, class_mode='all6')
+            self.assertEqual(plan['class_mode'], 'all6')
+            self.assertEqual(len(plan['tasks']), 48)
+            self.assertEqual(second.load_plan(out)['class_mode'], 'all6')
+
     def test_partial_or_fragmented_transition_rejected(self):
         mask = np.zeros((32, 32), dtype=bool)
         mask[2:8, 2:8] = True
