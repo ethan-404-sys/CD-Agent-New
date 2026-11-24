@@ -79,8 +79,11 @@ if [[ "$mode" == formal ]]; then
     fi
     if [[ -n "${BASELINE_DIR:-}" && -f "${BASELINE_DIR}/metrics.json" ]]; then
         phase='Baseline vs current A/B comparison'
-        "$py" "$repo/experiments/t3_visual_ref/compare_t32_runs.py" \
-            --baseline "$BASELINE_DIR" --current "$out" --out "$out/compare"
+        cmp_args=(--baseline "$BASELINE_DIR" --current "$out" --out "$out/compare")
+        if [[ -n "${ANNOTATIONS_JSON:-}" && -f "${ANNOTATIONS_JSON}" ]]; then
+            cmp_args+=(--annotations "$ANNOTATIONS_JSON")
+        fi
+        "$py" "$repo/experiments/t3_visual_ref/compare_t32_runs.py" "${cmp_args[@]}"
     fi
     phase=$("$py" -c 'import json,sys; d=json.load(open(sys.argv[1]))["overall"]; print("completed", d["count"], "micro IoU", round(d["micro"]["iou"],4), "micro F1", round(d["micro"]["f1"],4))' "$out/metrics.json")
 fi

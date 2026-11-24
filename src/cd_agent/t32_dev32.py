@@ -20,7 +20,7 @@ SIZE = (512, 512)
 SPLIT = 'dev'
 INSTRUCTION = (
     'The Visual reference image has 3 panels from left to right: (1) original reference scene, '
-    '(2) green-tinted TARGET land-cover category (unshaded regions and unshaded holes are NOT the target), '
+    '(2) magenta-tinted TARGET land-cover category (unshaded regions and unshaded holes are NOT the target), '
     'and (3) binary mask where WHITE = TARGET category and BLACK = NOT target. '
     'The reference and query are from different places and have no spatial correspondence. '
     'Match at the broad land-cover category level (e.g., buildings regardless of roof color or subtype, '
@@ -32,19 +32,20 @@ INSTRUCTION = (
 
 
 def render_reference_panel(reference, mask, tile_size=384, header_h=28):
-    """Render an unambiguous 3-panel visual reference: Original | Green-tinted TARGET | Binary White=TARGET."""
+    """Render an unambiguous 3-panel visual reference: Original | Magenta-tinted TARGET | Binary White=TARGET."""
     ref_rgb = reference.convert('RGB')
     mask_l = mask.convert('L')
     mask_bool = np.asarray(mask_l) != 0
     ref_arr = np.asarray(ref_rgb, dtype=np.float32)
 
-    # Shade strictly inside foreground pixels; draw 1px inner edge so excluded holes never get enclosed.
+    # Shade strictly inside foreground pixels with magenta (absent from natural remote-sensing land cover);
+    # draw 1px inner edge so excluded holes never get enclosed.
     overlay = ref_arr.copy()
-    tint = np.array([0.0, 230.0, 118.0], dtype=np.float32)
-    overlay[mask_bool] = overlay[mask_bool] * 0.60 + tint * 0.40
+    tint = np.array([236.0, 64.0, 180.0], dtype=np.float32)
+    overlay[mask_bool] = overlay[mask_bool] * 0.58 + tint * 0.42
     eroded = np.asarray(mask_l.filter(ImageFilter.MinFilter(3))) != 0
     inner_edge = mask_bool & ~eroded
-    overlay[inner_edge] = np.array([0.0, 255.0, 140.0], dtype=np.float32)
+    overlay[inner_edge] = np.array([255.0, 110.0, 210.0], dtype=np.float32)
     overlay_img = Image.fromarray(np.clip(overlay, 0, 255).astype(np.uint8))
 
     binary_arr = np.where(mask_bool, 255, 0).astype(np.uint8)
@@ -52,7 +53,7 @@ def render_reference_panel(reference, mask, tile_size=384, header_h=28):
 
     panels = [
         ('1. Original Reference', ref_rgb.resize((tile_size, tile_size), Image.Resampling.BILINEAR)),
-        ('2. Green = TARGET (unshaded = NOT)', overlay_img.resize((tile_size, tile_size), Image.Resampling.BILINEAR)),
+        ('2. Magenta = TARGET (unshaded = NOT)', overlay_img.resize((tile_size, tile_size), Image.Resampling.BILINEAR)),
         ('3. Mask: WHITE = TARGET, BLACK = NOT', binary_img.resize((tile_size, tile_size), Image.Resampling.NEAREST)),
     ]
     gap = 6

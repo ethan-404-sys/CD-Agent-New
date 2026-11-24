@@ -51,12 +51,13 @@ class T3P0FixesTests(unittest.TestCase):
         panel = render_reference_panel(ref, Image.fromarray(m), tile_size=64, header_h=20)
         arr = np.asarray(panel)
         self.assertEqual(panel.size, (64 * 3 + 12, 64 + 20))
-        # Middle panel (x=70..134, y=20..84): hole center must remain unshaded gray (120,120,120), NOT green/cyan!
+        # Middle panel (x=70..134, y=20..84): hole center must remain unshaded gray (120,120,120), NOT magenta!
         mid = arr[20:84, 70:134]
         hole_px = mid[24, 32]
         fg_px = mid[6, 6]
         self.assertTrue(np.allclose(hole_px, [120, 120, 120], atol=2), f'Hole should be unshaded, got {hole_px}')
-        self.assertGreater(int(fg_px[1]), int(fg_px[0]) + 40, f'Foreground should be green-tinted, got {fg_px}')
+        self.assertGreater(int(fg_px[0]), int(fg_px[1]) + 40, f'Foreground should be magenta-tinted (high R), got {fg_px}')
+        self.assertGreater(int(fg_px[2]), int(fg_px[1]) + 20, f'Foreground should be magenta-tinted (high B), got {fg_px}')
         # Right panel (x=140..204, y=20..84): binary white=foreground, black=hole/background.
         right = arr[20:84, 140:204]
         self.assertEqual(int(right[6, 6, 0]), 255)

@@ -283,7 +283,7 @@ class ApiAsk:
         words = ('T2 close-up', 'T2 wider view') if state_question else CROP_WORDS
         content = list(example_blocks()) if level == 'L2' and not (state_question or reference) else []
         if reference:
-            content.extend([dict(type='text', text='Single-date visual reference from a separate scene (3 panels left-to-right: original image | green-tinted TARGET category where unshaded areas and unshaded holes are NOT the target | binary mask where WHITE = TARGET category and BLACK = NOT target).'),
+            content.extend([dict(type='text', text='Single-date visual reference from a separate scene (3 panels left-to-right: original image | magenta-tinted TARGET category where unshaded areas and unshaded holes are NOT the target | binary mask where WHITE = TARGET category and BLACK = NOT target).'),
                             dict(type='image_url', image_url=dict(url=str(reference)))])
         for word, image in zip(words, images):
             content += [dict(type='text', text=word), dict(type='image_url',
@@ -298,10 +298,10 @@ class ApiAsk:
             settings = dict(settings, SYSTEM='You assess building damage from satellite imagery.')
             question = JDS_QUESTION
         if reference:
-            settings = dict(settings, SYSTEM='You verify whether the marked query region contains a real change involving the broad land-cover category marked WHITE/GREEN in the separate visual reference.')
+            settings = dict(settings, SYSTEM='You verify whether the marked query region contains a real change involving the broad land-cover category marked WHITE/MAGENTA in the separate visual reference.')
             suffix = settings['VERIFY'].split('Reply with JSON only:', 1)[1]
             question = ('The red contour in the paired query views marks the region to judge. Did the broad land-cover category '
-                        'marked GREEN (middle panel) / WHITE (right panel) in the separate reference appear, disappear, or change to or from another category '
+                        'marked MAGENTA (middle panel) / WHITE (right panel) in the separate reference appear, disappear, or change to or from another category '
                         'there between Query T1 and T2? Unshaded areas and black holes in the reference mask are NOT the target category. '
                         'Match at the broad land-cover category level (e.g., buildings regardless of roof color or subtype, bare land, roads, water, vegetation, farmland). '
                         'Exclude appearance differences due only to season, lighting, or misalignment. Reply with JSON only:' + suffix)

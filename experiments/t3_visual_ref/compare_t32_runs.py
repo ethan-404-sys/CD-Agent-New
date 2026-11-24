@@ -81,9 +81,66 @@ def _delta_str(v: float) -> str:
     return f'{v * 100:+.1f}%'
 
 
-def build_comparison(baseline_dir: Path, current_dir: Path, out_dir: Path, top_k: int = 5) -> dict:
+def _compute_stratified(deltas: list[dict], ann_path: Path | None) -> list[dict]:
+    if not ann_path or not ann_path.is_file():
+        return []
+    ann = _load_json(ann_path)
+    by_case = {c['case']: c for c in ann.get('cases') or []}
+
+    def _agg(label: str, subset: list[dict]) -> dict | None:
+        if not subset:
+            return None
+        n = len(subset)
+        old_f1 = sum(d['old_f1'] for d in subset) / n
+        new_f1 = sum(d['new_f1'] for d in subset) / n
+        old_iou = sum(d['old_iou'] for d in subset) / n
+        new_iou = sum(d['new_iou'] for d in subset) / n
+        return dict(
+            label=label,
+            count=n,
+            old_macro_f1=old_f1,
+            new_macro_f1=new_f1,
+            delta_macro_f1=new_f1 - old_f1,
+            old_macro_iou=old_iou,
+            new_macro_iou=new_iou,
+            delta_macro_iou=new_iou - old_iou,
+        )
+
+    keep_clean = [d for d in deltas if (by_case.get(d['case']) or {}).get('keep_in_dev') == 'keep_clean']
+    keep_hard = [d for d in deltas if (by_case.get(d['case']) or {}).get('keep_in_dev') == 'keep_hard']
+    kept_all = [d for d in deltas if (by_case.get(d['case']) or {}).get('keep_in_dev') in ('keep_clean', 'keep_hard')]
+    dropped = [d for d in deltas if (by_case.get(d['case']) or {}).get('keep_in_dev') == 'drop']
+    thing_all = [d for d in deltas if (by_case.get(d['case']) or {}).get('thing_or_stuff') == 'thing']
+    stuff_all = [d for d in deltas if (by_case.get(d['case']) or {}).get('thing_or_stuff') == 'stuff']
+    thing_kept = [d for d in kept_all if (by_case.get(d['case']) or {}).get('thing_or_stuff') == 'thing']
+    stuff_kept = [d for d in kept_all if (by_case.get(d['case']) or {}).get('thing_or_stuff') == 'stuff']
+
+    rows = []
+    for label, subset in (
+        ('Dev 干净集 (keep_clean)', keep_clean),
+        ('Dev 精修保留集 (clean + hard)', kept_all),
+        ('有挑战保留集 (keep_hard)', keep_hard),
+        ('脏/假变化剔除集 (drop)', dropped),
+        ('全集 · Thing (可数实体)', thing_all),
+        ('全集 · Stuff (连续地类)', stuff_all),
+        ('精修集 · Thing', thing_kept),
+        ('精修集 · Stuff', stuff_kept),
+    ):
+        row = _agg(label, subset)
+        if row:
+            rows.append(row)
+    return rows
+
+
+def build_comparison(baseline_dir: Path, current_dir: Path, out_dir: Path, top_k: int = 5,
+                     annotations_path: Path | None = None) -> dict:
     base_m = _load_json(baseline_dir / 'metrics.json')
     curr_m = _load_json(current_dir / 'metrics.json')
+
+    if annotations_path is None:
+        auto_ann = current_dir.parent / 'dev32_annotations.json'
+        if auto_ann.is_file():
+            annotations_path = auto_ann
 
     base_by_case = {c['case']: c for c in base_m['cases']}
     deltas = []
@@ -120,13 +177,17 @@ def build_comparison(baseline_dir: Path, current_dir: Path, out_dir: Path, top_k
     base_stats = _trace_stats(baseline_dir, base_m['cases'])
     curr_stats = _trace_stats(current_dir, curr_m['cases'])
 
+    stratified = _compute_stratified(deltas, annotations_path)
+
     summary = dict(
         baseline_name=baseline_dir.name,
         current_name=current_dir.name,
+        annotations_file=annotations_path.name if (annotations_path and annotations_path.is_file()) else None,
         overall_old=base_m['overall'],
         overall_new=curr_m['overall'],
         datasets_old=base_m['datasets'],
         datasets_new=curr_m['datasets'],
+        stratified=stratified,
         trace_stats_old=base_stats,
         trace_stats_new=curr_stats,
         top_improved=top_improved,
@@ -196,6 +257,21 @@ def _render_markdown(summary: dict, current_dir: Path, out_dir: Path) -> str:
         f"| 负例虚警像素 / 全空数 | {oo['negative_false_alarms']} ({oo['negative_empty_predictions']}/{oo['negatives']}) | {on['negative_false_alarms']} ({on['negative_empty_predictions']}/{on['negatives']}) | {on['negative_false_alarms'] - oo['negative_false_alarms']:+d} px |",
         f"| 平均轮次 | {to['avg_rounds']} | {tn['avg_rounds']} | {tn['avg_rounds'] - to['avg_rounds']:+.2f} |",
         f"| 文本分割零检率 | {to['zero_detections']}/{to['segment_calls']} ({_pct(to['zero_rate'])}) | {tn['zero_detections']}/{tn['segment_calls']} ({_pct(tn['zero_rate'])}) | {_delta_str(tn['zero_rate'] - to['zero_rate'])} |",
+    ])
+    if summary.get('stratified'):
+        lines.extend([
+            '',
+            '## 一(附)、人工核查分层对比（双口径与 Thing / Stuff）',
+            '',
+            '| 子集分层 | 样本数 | 旧 Macro F1 | 新 Macro F1 | F1 变化 | 旧 Macro IoU | 新 Macro IoU |',
+            '| :--- | :---: | :---: | :---: | :---: | :---: | :---: |',
+        ])
+        for row in summary['stratified']:
+            lines.append(
+                f"| {row['label']} | {row['count']} | {_pct(row['old_macro_f1'])} | {_pct(row['new_macro_f1'])} "
+                f"| {_delta_str(row['delta_macro_f1'])} | {_pct(row['old_macro_iou'])} | {_pct(row['new_macro_iou'])} |"
+            )
+    lines.extend([
         '',
         '## 二、Top-5 涨分样本',
         '',
@@ -259,6 +335,20 @@ def _render_html(summary: dict, current_dir: Path, out_dir: Path) -> str:
             f"<tr><th>{html.escape(ds)}</th><td>{_pct(om)}</td><td>{_pct(nm)}</td><td>{_delta_str(nm - om)}</td>"
             f"<td>{_pct(of1)}</td><td>{_pct(nf1)}</td><td>{_delta_str(nf1 - of1)}</td></tr>"
         )
+    strat_block = ''
+    if summary.get('stratified'):
+        s_rows = ''.join(
+            f"<tr><th>{html.escape(r['label'])}</th><td>{r['count']}</td>"
+            f"<td>{_pct(r['old_macro_f1'])}</td><td>{_pct(r['new_macro_f1'])}</td><td><b>{_delta_str(r['delta_macro_f1'])}</b></td>"
+            f"<td>{_pct(r['old_macro_iou'])}</td><td>{_pct(r['new_macro_iou'])}</td></tr>"
+            for r in summary['stratified']
+        )
+        strat_block = (
+            '<h2>人工核查分层对比（双口径与 Thing / Stuff）</h2>'
+            '<table><thead><tr><th>子集分层</th><th>样本数</th><th>旧 Macro F1</th><th>新 Macro F1</th>'
+            '<th>F1 变化</th><th>旧 Macro IoU</th><th>新 Macro IoU</th></tr></thead>'
+            f'<tbody>{s_rows}</tbody></table>'
+        )
     replay_hub = current_dir / 'replay' / 'index.html'
     hub_link = f'<a class="btn" href="{html.escape(Path(os.path.relpath(replay_hub, out_dir)).as_posix())}">打开 32 题完整回放总览</a>' if replay_hub.is_file() else ''
     return f"""<!DOCTYPE html>
@@ -298,6 +388,7 @@ def _render_html(summary: dict, current_dir: Path, out_dir: Path) -> str:
   <div>{hub_link}</div>
 </header>
 <main>
+  {strat_block}
   <h2>分数据集对比</h2>
   <table>
     <thead><tr><th>数据集</th><th>旧 Micro F1</th><th>新 Micro F1</th><th>Micro 变化</th><th>旧正例 Macro F1</th><th>新正例 Macro F1</th><th>正例 Macro 变化</th></tr></thead>
@@ -318,10 +409,13 @@ def main() -> None:
     parser.add_argument('--baseline', type=Path, required=True, help='Baseline Dev-32 run directory')
     parser.add_argument('--current', type=Path, required=True, help='Current Dev-32 run directory')
     parser.add_argument('--out', type=Path, help='Output directory (default: <current>/compare)')
+    parser.add_argument('--annotations', type=Path, help='Optional manual review annotations JSON for stratified metrics')
     parser.add_argument('--top-k', type=int, default=5)
     args = parser.parse_args()
     out_dir = args.out.resolve() if args.out else (args.current.resolve() / 'compare')
-    summary = build_comparison(args.baseline.resolve(), args.current.resolve(), out_dir, top_k=args.top_k)
+    ann_path = args.annotations.resolve() if args.annotations else None
+    summary = build_comparison(args.baseline.resolve(), args.current.resolve(), out_dir,
+                               top_k=args.top_k, annotations_path=ann_path)
     oo, on = summary['overall_old'], summary['overall_new']
     print(
         f"COMPARE_DONE macro_f1={oo['macro']['f1']:.4f}->{on['macro']['f1']:.4f} "
