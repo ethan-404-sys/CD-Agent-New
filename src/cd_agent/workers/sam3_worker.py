@@ -22,12 +22,26 @@ from common import load_rgb
 from ..segment_cache import manifest_cache_path
 
 
+def _to_numpy(value):
+    if value is None:
+        return None
+    if hasattr(value, 'detach'):
+        value = value.detach()
+    if hasattr(value, 'float'):
+        value = value.float()
+    if hasattr(value, 'cpu'):
+        value = value.cpu()
+    if hasattr(value, 'numpy'):
+        return np.asarray(value.numpy())
+    return np.asarray(value)
+
+
 class Segmenter:
     def __init__(self, processor, engine, run):
         self.processor, self.engine, self.run = processor, engine, Path(run)
         self.lock = threading.Lock()
 
-    def infer(self, split, name, time, text, tile, conf=.1, pixel_thr=.5, image_path=None):
+    def infer(self, split, name, time, text, tile, conf=.1, pixel_thr=.5, image_path=None, force=False):
         if time not in ('t1', 't2') or tile not in (0, 256, 512) or not 0 <= conf <= 1 or not 0 < pixel_thr < 1:
             raise ValueError('Invalid segmentation parameters')
         text = ' '.join(text.lower().split())
@@ -40,7 +54,7 @@ class Segmenter:
         started = __import__('time').monotonic()
         with self.lock:
             queued = __import__('time').monotonic() - started
-            if path.exists():
+            if path.exists() and not force:
                 return dict(ok=True, path=str(path), cache_hit=True, seconds=0, queue_seconds=queued)
             import torch
             image = np.asarray(Image.open(image_path).convert('RGB')) if image_path is not None else load_rgb(split, name)[0 if time == 't1' else 1]
@@ -48,11 +62,25 @@ class Segmenter:
             self.processor.confidence_threshold = conf
             step_y, step_x = (tile, tile) if tile else (h, w)
             packed, scores = [], []
+            sem_prob = None
+            pres_scores = []
             for y in range(0, h, step_y):
                 for x in range(0, w, step_x):
+                    crop = image[y:y+step_y, x:x+step_x]
+                    ch, cw = crop.shape[:2]
                     with torch.inference_mode(), self.engine.autocast():
-                        state = self.processor.set_image(Image.fromarray(image[y:y+step_y, x:x+step_x]))
+                        state = self.processor.set_image(Image.fromarray(crop))
                         state = self.processor.set_text_prompt(prompt=text, state=state)
+                    raw_pres = _to_numpy(state.get('presence_score'))
+                    if raw_pres is not None:
+                        pres_scores.append(float(np.asarray(raw_pres).reshape(-1)[0]))
+                    raw_sem = _to_numpy(state.get('semantic_mask_logits'))
+                    if raw_sem is not None:
+                        sem_tile = np.squeeze(raw_sem).astype(np.float32)
+                        if sem_tile.shape == (ch, cw):
+                            if sem_prob is None:
+                                sem_prob = np.zeros((h, w), np.float32)
+                            sem_prob[y:y+ch, x:x+cw] = np.maximum(sem_prob[y:y+ch, x:x+cw], np.clip(sem_tile, 0.0, 1.0))
                     if not len(state['scores']):
                         continue
                     masks = (state['masks'] if pixel_thr == .5 else state['masks_logits'] > pixel_thr)[:, 0].cpu().numpy().astype(bool)
@@ -64,8 +92,13 @@ class Segmenter:
                         scores.append(float(score))
             path.parent.mkdir(parents=True, exist_ok=True)
             temp = path.with_suffix('.tmp.npz')
-            np.savez(temp, masks=np.asarray(packed, np.uint8).reshape(len(packed), (h*w+7)//8),
-                     scores=np.asarray(scores, np.float32), shape=[h,w], text=text, tile=tile, conf=conf)
+            payload = dict(masks=np.asarray(packed, np.uint8).reshape(len(packed), (h*w+7)//8),
+                           scores=np.asarray(scores, np.float32), shape=[h,w], text=text, tile=tile, conf=conf)
+            if sem_prob is not None:
+                payload['sem_prob'] = np.clip(np.round(sem_prob * 255.0), 0, 255).astype(np.uint8)
+            if pres_scores:
+                payload['presence_score'] = np.float32(max(pres_scores))
+            np.savez(temp, **payload)
             temp.replace(path)
         return dict(ok=True, path=str(path), cache_hit=False,
                     seconds=__import__('time').monotonic()-started-queued, queue_seconds=queued)

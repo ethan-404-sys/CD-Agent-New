@@ -9,7 +9,7 @@ import random
 import shutil
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 from .evaluation import pixel_counts
 
@@ -19,12 +19,53 @@ MODEL = 'qwen3.7-flash'
 SIZE = (512, 512)
 SPLIT = 'dev'
 INSTRUCTION = (
-    'The cyan outline and spotlight in the single-date visual reference identify a land-cover category. '
+    'The Visual reference image has 3 panels from left to right: (1) original reference scene, '
+    '(2) green-tinted TARGET land-cover category (unshaded regions and unshaded holes are NOT the target), '
+    'and (3) binary mask where WHITE = TARGET category and BLACK = NOT target. '
     'The reference and query are from different places and have no spatial correspondence. '
+    'Match at the broad land-cover category level (e.g., buildings regardless of roof color or subtype, '
+    'bare land, farmland, grass/vegetation, road, water, playground). '
     'Find all real changes between Query T1 and Query T2 involving that same category, including appearance, '
     'disappearance, or conversion from or to another category. If there is no such change, submit an all-zero mask. '
     'The submit tool writes your final 512×512 single-channel binary PNG to prediction.png in the session output directory.'
 )
+
+
+def render_reference_panel(reference, mask, tile_size=384, header_h=28):
+    """Render an unambiguous 3-panel visual reference: Original | Green-tinted TARGET | Binary White=TARGET."""
+    ref_rgb = reference.convert('RGB')
+    mask_l = mask.convert('L')
+    mask_bool = np.asarray(mask_l) != 0
+    ref_arr = np.asarray(ref_rgb, dtype=np.float32)
+
+    # Shade strictly inside foreground pixels; draw 1px inner edge so excluded holes never get enclosed.
+    overlay = ref_arr.copy()
+    tint = np.array([0.0, 230.0, 118.0], dtype=np.float32)
+    overlay[mask_bool] = overlay[mask_bool] * 0.60 + tint * 0.40
+    eroded = np.asarray(mask_l.filter(ImageFilter.MinFilter(3))) != 0
+    inner_edge = mask_bool & ~eroded
+    overlay[inner_edge] = np.array([0.0, 255.0, 140.0], dtype=np.float32)
+    overlay_img = Image.fromarray(np.clip(overlay, 0, 255).astype(np.uint8))
+
+    binary_arr = np.where(mask_bool, 255, 0).astype(np.uint8)
+    binary_img = Image.fromarray(np.stack([binary_arr] * 3, axis=-1))
+
+    panels = [
+        ('1. Original Reference', ref_rgb.resize((tile_size, tile_size), Image.Resampling.BILINEAR)),
+        ('2. Green = TARGET (unshaded = NOT)', overlay_img.resize((tile_size, tile_size), Image.Resampling.BILINEAR)),
+        ('3. Mask: WHITE = TARGET, BLACK = NOT', binary_img.resize((tile_size, tile_size), Image.Resampling.NEAREST)),
+    ]
+    gap = 6
+    width = tile_size * 3 + gap * 2
+    height = header_h + tile_size
+    canvas = Image.new('RGB', (width, height), (24, 28, 34))
+    draw = ImageDraw.Draw(canvas)
+    for idx, (title, img) in enumerate(panels):
+        x0 = idx * (tile_size + gap)
+        draw.rectangle([x0, 0, x0 + tile_size - 1, header_h - 1], fill=(32, 38, 46))
+        draw.text((x0 + 8, 8), title, fill=(240, 245, 250))
+        canvas.paste(img, (x0, header_h))
+    return canvas
 
 
 def load(path):
@@ -96,7 +137,27 @@ def sample(rows):
     return selected
 
 
-def prepare(manifest, out):
+def prepare(manifest, out, reuse_from=None):
+    if reuse_from is not None:
+        source_dir = Path(reuse_from).resolve()
+        sample_data = load(source_dir / 'sample.json')
+        out.mkdir(parents=True, exist_ok=True)
+        public = []
+        for record in sample_data['cases']:
+            case = record['case']
+            src_folder = source_dir / 'inputs' / case
+            dst_folder = out / 'inputs' / case
+            dst_folder.mkdir(parents=True, exist_ok=True)
+            for fname in ('query-a.png', 'query-b.png', 'query-a.jpg', 'query-b.jpg', 'reference.png', 'reference-mask.png'):
+                shutil.copyfile(src_folder / fname, dst_folder / fname)
+            reference = read_image(dst_folder / 'reference.png', 'RGB')
+            mask = read_image(dst_folder / 'reference-mask.png', 'L')
+            render_reference_panel(reference, mask).save(dst_folder / 'reference-view.jpg', quality=92)
+            public.append(case)
+        save(out / 'inputs' / 'cases.json', public)
+        save(out / 'sample.json', sample_data)
+        print('Reused and refreshed', len(public), 'cases into', out, flush=True)
+        return
     if (out / 'sample.json').exists():
         print('Using the existing fixed sample', flush=True)
         return
@@ -116,11 +177,9 @@ def prepare(manifest, out):
         mask = Image.fromarray((np.asarray(read_image(ref['mask'])) != 0).astype(np.uint8) * 255)
         if mask.mode != 'L' or not mask.getbbox():
             raise ValueError(f'{case}: expected a nonempty reference mask')
-        spotlight = np.array(Image.composite(reference, reference.point(lambda v: int(v * .38)), mask))
-        spotlight[np.asarray(mask.filter(ImageFilter.MaxFilter(5))) > np.asarray(mask)] = (34, 209, 255)
         reference.save(folder / 'reference.png')
         mask.save(folder / 'reference-mask.png')
-        Image.fromarray(spotlight).save(folder / 'reference-view.jpg', quality=95)
+        render_reference_panel(reference, mask).save(folder / 'reference-view.jpg', quality=92)
         public.append(case)
         audit.append(dict(case=case, manifest_row=index, gt=row['label'][0], dataset=meta['dataset'],
                           gt_pixels=meta['positive_pixels'], ignore_pixels=meta['ignore_pixels'],
@@ -163,20 +222,25 @@ def infer(inputs, traces, worker, concurrency, limit, smoke=False):
         planner = Planner(guard=guard, parameters={'model': MODEL}, seed=seed_for(case, SEED))
         backend = SegmentBackend(SPLIT, case, worker, target=session.target, image_paths=list(map(str, sources)))
         verifier = ApiAsk(guard=guard, model=MODEL, correspondence=True, session=session)
-        toolbox = Toolbox(rgb, directory, backend, prompter.for_image(SPLIT, case, rgb=rgb), verifier, session=session, python=True)
+        toolbox = Toolbox(rgb, directory, backend, prompter.for_image(SPLIT, case, rgb=rgb), verifier,
+                          session=session, python=True, big_box_share=0.5, answer_state=True,
+                          explicit_answer=True, segment_pair=True, sam3_semantic=True)
         if smoke:
-            # Exercise both providers before starting the ordinary session.
-            backend('t1', 'building', 0, .5)
+            # Exercise both providers (instance + semantic head) before starting the ordinary session.
+            backend('t1', 'building', 0, .5, mode='fused')
             answer, _, _, _ = verifier.one([read_image(path, 'RGB') for path in sources], '', 0)
             if answer['answer'] not in ('yes', 'no'):
                 raise RuntimeError('Verifier returned no decision')
         result = run_session(toolbox, planner, recorder, task='T3.2', prompt_version='refcd',
-                             verify=True, gate3=True, status=True,
+                             verify=True, gate3=True, status=True, answer_state=True,
+                             explicit_answer=True, segment_pair=True, sam3_semantic=True,
                              metadata=dict(session_id=case, source_images=list(map(str, sources)),
                                            reference_view=str(reference), reference_image=str(folder / 'reference.png'),
                                            reference_mask=str(folder / 'reference-mask.png'),
                                            first_images={label: str(path) for label, path in session.visual_query.items()},
-                                           backends=dict(ask='api', ask_model=MODEL, verify_stage=True, ask_correspondence=True)))
+                                           backends=dict(ask='api', ask_model=MODEL, verify_stage=True,
+                                                         ask_correspondence=True, sam3_semantic=True,
+                                                         explicit_answer=True, segment_pair=True)))
         final_mask = directory / result['mask_path']
         with Image.open(final_mask) as image:
             if image.size != SIZE or image.format != 'PNG' or image.mode not in ('L', '1'):
@@ -283,7 +347,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     stage = sub.add_parser('prepare')
-    stage.add_argument('--manifest', type=Path, required=True)
+    stage.add_argument('--manifest', type=Path)
+    stage.add_argument('--reuse-from', type=Path)
     stage.add_argument('--out', type=Path, required=True)
     run = sub.add_parser('infer')
     run.add_argument('--inputs', type=Path, required=True)
@@ -296,7 +361,10 @@ def main():
     finish.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'prepare':
-        prepare(args.manifest.resolve(), args.out.resolve())
+        if not args.reuse_from and not args.manifest:
+            parser.error('prepare requires either --manifest or --reuse-from')
+        prepare(args.manifest.resolve() if args.manifest else None, args.out.resolve(),
+                reuse_from=args.reuse_from.resolve() if args.reuse_from else None)
     elif args.command == 'infer':
         infer(args.inputs.resolve(), args.traces.resolve(), args.sam3_worker, args.concurrency, args.limit, args.smoke)
     else:

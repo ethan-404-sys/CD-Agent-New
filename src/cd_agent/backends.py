@@ -14,7 +14,7 @@ import numpy as np
 from prompts import PSEUDO_TYPES, SYSTEM, VERIFY
 from .scope_t13 import scope_card, verifier_prompts, session_prompts
 from . import instances
-from .segment_cache import manifest_cache_path, read_instances
+from .segment_cache import manifest_cache_path, read_instances, read_segment_result
 from .state import ToolError
 from .planner import Planner
 
@@ -63,20 +63,24 @@ class SegmentBackend:
         self.cache_config = scope_card(target)["sam3_cache"]
         self.split, self.name, self.worker, self.pixel_thr = split, name, worker, pixel_thr
 
-    def __call__(self, time, text, tile, score_thr):
+    def __call__(self, time, text, tile, score_thr, mode='instance'):
         import sam3_t7
         index = 0 if time == 't1' else 1
         cached_class = isinstance(self.target, str) and ''.join(text.lower().split()) == ''.join(self.target.lower().split())
-        cache = self.cache_config if cached_class else {}
+        cache = self.cache_config if (cached_class and mode == 'instance') else {}
+        force_refresh = False
         if self.image_paths is not None:
             cache = {}  # Explicit images use the worker's source-path namespace.
             conf = min(.1, score_thr)
             root = Path(os.environ.get('AGENT_RUN', str(Path(__file__).resolve().parents[2] / '.runtime/agent_run')))
             path = manifest_cache_path(root, self.image_paths[index], text, tile, conf, self.pixel_thr)
             if path.is_file():
-                return read_instances(path, score_thr), dict(cache_hit=True, backend='sam3_manifest_cache',
-                    tile=tile, conf=conf, pixel_thr=self.pixel_thr)
-        if self.pixel_thr != .5:
+                rows, extra = read_segment_result(path, score_thr, mode=mode)
+                if mode == 'instance' or extra['has_semantic'] or self.worker is None:
+                    return rows, dict(cache_hit=True, backend='sam3_manifest_cache',
+                        tile=tile, conf=conf, pixel_thr=self.pixel_thr, **extra)
+                force_refresh = True
+        if self.pixel_thr != .5 and mode == 'instance':
             # The soft cache holds scores from 0.3 and values from 0.2.
             if cache and tile == 512 and score_thr >= cache['soft_min_score']:
                 try:
@@ -84,7 +88,7 @@ class SegmentBackend:
                         cache_hit=True, backend='sam3_soft_cache', tile=tile, pixel_thr=self.pixel_thr)
                 except FileNotFoundError:
                     pass
-        elif cache and ((tile == 512 and score_thr >= cache['tile_min_score']) or (tile == 0 and score_thr >= cache['full_min_score'])):
+        elif cache and mode == 'instance' and ((tile == 512 and score_thr >= cache['tile_min_score']) or (tile == 0 and score_thr >= cache['full_min_score'])):
             conf = cache['tile_min_score'] if tile == 512 else cache['full_min_score']
             try:
                 masks, scores = sam3_t7.read(self.split, self.name, tile, conf=conf, min_score=score_thr)[index]
@@ -99,15 +103,13 @@ class SegmentBackend:
         payload = dict(split=self.split, name=self.name, time=time, text=text, tile=tile, conf=conf, pixel_thr=self.pixel_thr)
         if self.image_paths is not None:
             payload['image_path'] = self.image_paths[index]
+        if force_refresh:
+            payload['force'] = True
         response = post(self.worker, payload)
-        with np.load(response['path']) as z:
-            h, w = (int(x) for x in z['shape'])
-            scores = z['scores']
-            keep = scores >= score_thr
-            masks = np.unpackbits(z['masks'][keep], axis=1, count=h*w).reshape(-1, h, w).astype(bool)
-            rows = instances.from_dense(masks, scores[keep])
+        rows, extra = read_segment_result(response['path'], score_thr, mode=mode)
         return rows, dict(cache_hit=response.get('cache_hit', False), backend='sam3_worker',
-                          worker_seconds=response.get('seconds'), cache_path=response['path'], conf=conf, pixel_thr=self.pixel_thr)
+                          worker_seconds=response.get('seconds'), cache_path=response['path'], conf=conf,
+                          pixel_thr=self.pixel_thr, **extra)
 
 
 class SharedPrompter:
@@ -281,7 +283,7 @@ class ApiAsk:
         words = ('T2 close-up', 'T2 wider view') if state_question else CROP_WORDS
         content = list(example_blocks()) if level == 'L2' and not (state_question or reference) else []
         if reference:
-            content.extend([dict(type='text', text='Single-date reference from a separate scene. The highlighted region defines the target class.'),
+            content.extend([dict(type='text', text='Single-date visual reference from a separate scene (3 panels left-to-right: original image | green-tinted TARGET category where unshaded areas and unshaded holes are NOT the target | binary mask where WHITE = TARGET category and BLACK = NOT target).'),
                             dict(type='image_url', image_url=dict(url=str(reference)))])
         for word, image in zip(words, images):
             content += [dict(type='text', text=word), dict(type='image_url',
@@ -296,10 +298,12 @@ class ApiAsk:
             settings = dict(settings, SYSTEM='You assess building damage from satellite imagery.')
             question = JDS_QUESTION
         if reference:
-            settings = dict(settings, SYSTEM='You verify whether the marked query region contains a real change involving the class highlighted in the separate visual reference.')
+            settings = dict(settings, SYSTEM='You verify whether the marked query region contains a real change involving the broad land-cover category marked WHITE/GREEN in the separate visual reference.')
             suffix = settings['VERIFY'].split('Reply with JSON only:', 1)[1]
-            question = ('The red contour in the paired query views marks the region to judge. Did the class highlighted in '
-                        'the separate reference appear, disappear, or change to or from another class there between Query T1 and T2? '
+            question = ('The red contour in the paired query views marks the region to judge. Did the broad land-cover category '
+                        'marked GREEN (middle panel) / WHITE (right panel) in the separate reference appear, disappear, or change to or from another category '
+                        'there between Query T1 and T2? Unshaded areas and black holes in the reference mask are NOT the target category. '
+                        'Match at the broad land-cover category level (e.g., buildings regardless of roof color or subtype, bare land, roads, water, vegetation, farmland). '
                         'Exclude appearance differences due only to season, lighting, or misalignment. Reply with JSON only:' + suffix)
             settings['CORRESPONDENCE'] = ('Query close-ups come first, followed by the wider query views. ' + question)
         content.append(dict(type='text', text=question if question_variant else T2_STATE_QUESTION if state_question else settings['CORRESPONDENCE'] if self.correspondence else (CONTEXT_NOTE if len(images) > 2 else '') + question))

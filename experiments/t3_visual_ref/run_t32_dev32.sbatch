@@ -13,7 +13,7 @@ py=$account/conda_envs/exp5-env/bin/python
 worker_py=$account/conda_envs/omniovcd-env/bin/python
 key_loader=$account/Chang-Agent/tools/run_with_bailian_csv.py
 mode=${1:?Expected smoke or formal}
-out=$repo/outputs/t3_visual_ref/t32_dev32
+out=${OUT_DIR:-$repo/outputs/t3_visual_ref/t32_dev32}
 work=$out
 if [[ "$mode" == smoke ]]; then
     work=$repo/.runtime/smoke/t32-dev32-${SLURM_JOB_ID}
@@ -28,7 +28,7 @@ while IFS= read -r name; do
 done < <(compgen -e)
 export AGENT_RUN="$work" PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 AGENT_ASK_SLOTS=3
-export PYTHONPATH="$repo/src:$repo/third_party/DynamicEarth/third_party/segment_anything"
+export PYTHONPATH="$repo/src:$repo/third_party/OmniOVCD:$repo/third_party/DynamicEarth/third_party/segment_anything"
 export PYTHONUNBUFFERED=1
 started=$SECONDS
 worker=''
@@ -74,6 +74,13 @@ fi
 if [[ "$mode" == formal ]]; then
     phase='Offline scoring and replay generation'
     "$py" -m cd_agent.t32_dev32 report --out "$out"
-    "$py" -m cd_agent.t32_replay --out "$out" --demo "$out/demo_g3"
+    if [[ -f "$out/demo_g3/coverage.json" ]]; then
+        "$py" -m cd_agent.t32_replay --out "$out" --demo "$out/demo_g3"
+    fi
+    if [[ -n "${BASELINE_DIR:-}" && -f "${BASELINE_DIR}/metrics.json" ]]; then
+        phase='Baseline vs current A/B comparison'
+        "$py" "$repo/experiments/t3_visual_ref/compare_t32_runs.py" \
+            --baseline "$BASELINE_DIR" --current "$out" --out "$out/compare"
+    fi
     phase=$("$py" -c 'import json,sys; d=json.load(open(sys.argv[1]))["overall"]; print("completed", d["count"], "micro IoU", round(d["micro"]["iou"],4), "micro F1", round(d["micro"]["f1"],4))' "$out/metrics.json")
 fi

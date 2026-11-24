@@ -120,8 +120,9 @@ def area_select_schema(function):
     return function
 
 
-def session_schemas(session, python=False, tools_t13=False, tool_hints='off', gate5=False, answer_state=False, segment_pair=False, t3_semantic_bridge=False, missed_candidates=False):
+def session_schemas(session, python=False, tools_t13=False, tool_hints='off', gate5=False, answer_state=False, segment_pair=False, t3_semantic_bridge=False, missed_candidates=False, sam3_semantic=False, explicit_answer=False):
     import copy
+    answer_state = answer_state or explicit_answer
     schemas = copy.deepcopy(SCHEMAS)
     if t3_semantic_bridge:
         schemas.extend(bridge_schemas())
@@ -131,6 +132,14 @@ def session_schemas(session, python=False, tools_t13=False, tool_hints='off', ga
         schemas.append(copy.deepcopy(ANSWER_SCHEMA))
     if segment_pair:
         schemas.append(copy.deepcopy(PAIR_SCHEMA))
+    if sam3_semantic:
+        mode_prop = arg('string', enum=['instance', 'semantic', 'fused'], default='instance',
+                        description='instance for discrete objects (e.g. buildings); semantic or fused for continuous stuff (e.g. bare land, farmland, grass, vegetation, road, water).')
+        for entry in schemas:
+            fn = entry['function']
+            if fn['name'] in ('segment_text', 'segment_text_pair'):
+                fn['parameters']['properties']['mode'] = copy.deepcopy(mode_prop)
+                fn['description'] += ' Supports mode=instance|semantic|fused and reports presence_score and semantic_area.'
     if session.area_min_px is not None:
         area_select_schema(next(s['function'] for s in schemas if s['function']['name'] == 'select'))
     if (session.target, session.change_direction) != ('building', 'any'):
@@ -150,6 +159,14 @@ def session_schemas(session, python=False, tools_t13=False, tool_hints='off', ga
             python_schema['function']['description'] += (' The read-only arrays images["reference"] and '
                 'masks["reference"] are the original reference and its category mask in reference coordinates.')
         schemas.append(python_schema)
+    if explicit_answer:
+        draft_note = 'Creates a draft mask without changing your current answer (default set_current=false); call set_answer(mask) or pass set_current=true to make it your current answer.'
+        for entry in schemas:
+            fn = entry['function']
+            props = fn['parameters'].get('properties', {})
+            if 'set_current' in props:
+                props['set_current'] = arg('boolean', default=False)
+                fn['description'] = fn['description'].replace(CURRENT, draft_note)
     from .examples_t3x import extend_schema
     schemas = extend_schema(extend_schemas(schemas, tools_t13, tool_hints), session)
     if gate5:
@@ -274,7 +291,7 @@ def failure(code, message):
 
 
 class Toolbox(ProposalTools, SemanticBridgeTools):
-    def __init__(self, rgb, directory, segment=None, prompt=None, ask=None, session=None, init_mask=None, python=False, tools_t13=False, vision=None, gate3=False, big_box_share=BIG_BOX_SHARE, gate4=False, map_input=False, gate5=False, gate6=False, answer_state=False, segment_pair=False):
+    def __init__(self, rgb, directory, segment=None, prompt=None, ask=None, session=None, init_mask=None, python=False, tools_t13=False, vision=None, gate3=False, big_box_share=BIG_BOX_SHARE, gate4=False, map_input=False, gate5=False, gate6=False, answer_state=False, segment_pair=False, sam3_semantic=False, explicit_answer=False):
         self.rgb = tuple(np.array(im, copy=True) for im in rgb)
         self.session = session or Session(self.rgb[0].shape[:2], init_mask)
         if map_input:
@@ -299,8 +316,10 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
         self.gate4 = gate4 or gate5
         self.gate5 = gate5
         self.gate6 = gate6
-        self.answer_state = answer_state
+        self.explicit_answer = explicit_answer
+        self.answer_state = answer_state or explicit_answer
         self.segment_pair = segment_pair
+        self.sam3_semantic = sam3_semantic
         self.missed_provider = None
         self.t3_semantic_bridge = False
         self.bridge_seed = 1016
@@ -328,16 +347,23 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
             if name == 'select' and self.session.area_min_px is not None:
                 import copy
                 spec = area_select_schema(dict(description='', parameters=copy.deepcopy(spec)))['parameters']
+            if self.sam3_semantic and name in ('segment_text', 'segment_text_pair'):
+                import copy
+                spec = copy.deepcopy(spec)
+                spec['properties']['mode'] = arg('string', enum=['instance', 'semantic', 'fused'], default='instance')
             if self.gate5:
                 from .gate5 import SEGMENT_TOOLS, region_spec
                 if name in SEGMENT_TOOLS:
                     spec = region_spec(spec)
             validate(args, spec)
-            pyinspect.signature(getattr(self, name)).bind(**args)
+            call_args = dict(args)
+            if self.explicit_answer and 'set_current' in spec.get('properties', {}) and 'set_current' not in call_args:
+                call_args['set_current'] = False
+            pyinspect.signature(getattr(self, name)).bind(**call_args)
             if getattr(self.session, 'old_map', None):
                 from .map_input import check_tool
-                check_tool(name, args)
-            result = getattr(self, name)(**args)
+                check_tool(name, call_args)
+            result = getattr(self, name)(**call_args)
             if not isinstance(result, Result):
                 result = Result(dict(ok=True, **result))
         except ToolError as exc:
@@ -373,7 +399,8 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
             row = dict(handle=key, type=key.split('#', 1)[0], value_type=type(item).__name__,
                        created_order=handles.index(key), time=getattr(item, 'time', None))
             if isinstance(item, Mask):
-                row.update(component_ids=[c['id'] for c in item.components][:64],
+                row.update(area=int(item.data.sum()),
+                           component_ids=[c['id'] for c in item.components][:64],
                            component_count=len(item.components))
                 if key == self.session.current_mask:
                     verified = self.records(item)
@@ -382,6 +409,8 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
                     row['verification_ids'] = {k: [c['id'] for c in v if c['id'] in visible]
                                                for k, v in verified.items()}
                     row['verification_ids_truncated'] = len(item.components) > len(visible)
+            elif isinstance(item, Instances):
+                row.update(n=len(item.items), area=int(instances.to_mask(item.items, self.session.shape).sum()))
             rows.append(row)
         return dict(current_mask=self.session.current_mask, handles=rows,
                     omitted_handles=max(0, len(handles)-len(selected)),
@@ -448,13 +477,22 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
         return dict(mask=mask, total_components=len(rows), returned=len(selected),
                     has_more=offset + len(selected) < len(rows), components=selected)
 
-    def segment_text(self, time, text, tile=512, score_thr=0.5, region=None):
+    def segment_text(self, time, text, tile=512, score_thr=0.5, region=None, mode='instance'):
         from .gate5 import resolve_region, clip_instances, clip_result
         region_data = resolve_region(self, region)
         text = ' '.join(text.lower().split())
         if not text:
             raise ToolError('bad_args', 'text must name an object class.')
-        rows, meta = self._backend(self.segment_backend, time, text, tile, score_thr)
+        backend_args = (time, text, tile, score_thr)
+        backend_kwargs = {}
+        if self.sam3_semantic or mode != 'instance':
+            try:
+                sig = pyinspect.signature(self.segment_backend)
+                if 'mode' in sig.parameters or any(p.kind == pyinspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    backend_kwargs['mode'] = mode
+            except (TypeError, ValueError):
+                pass
+        rows, meta = self._backend(self.segment_backend, *backend_args, **backend_kwargs)
         self.meta.update(meta)
         if region is not None:
             rows, stats = clip_instances(rows, region, region_data)
@@ -462,9 +500,15 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
         scores = [r['score'] for r in rows if r.get('score') is not None]
         result = dict(inst=key, n=len(rows), area=int(instances.to_mask(rows, self.session.shape).sum()),
                     score=dict(min=float(min(scores)), median=float(np.median(scores)), max=float(max(scores))) if scores else None)
+        if self.sam3_semantic:
+            result['mode'] = meta.get('mode', mode)
+            if meta.get('presence_score') is not None:
+                result['presence_score'] = round(float(meta['presence_score']), 4)
+            if meta.get('semantic_area') is not None:
+                result['semantic_area'] = int(meta['semantic_area'])
         return clip_result(self, result, stats) if region is not None else result
 
-    def segment_text_pair(self, text, tile=512, score_thr=0.5):
+    def segment_text_pair(self, text, tile=512, score_thr=0.5, mode='instance'):
         # SAM3 worker serializes mutable processor state. Reuse the existing
         # per-time adapter/cache without introducing unsafe shared-model threads.
         results, provenance = {}, {}
@@ -472,7 +516,7 @@ class Toolbox(ProposalTools, SemanticBridgeTools):
             for time in ('t1', 't2'):
                 self.meta = {}
                 try:
-                    results[time] = self.segment_text(time, text, tile, score_thr)
+                    results[time] = self.segment_text(time, text, tile, score_thr, mode=mode)
                 finally:
                     provenance[time] = dict(self.meta)
         finally:

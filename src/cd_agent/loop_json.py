@@ -112,7 +112,7 @@ def latest_mask(session):
     return masks[-1] if masks else None
 
 
-def run_session(toolbox, planner, recorder, task='T1.1xC0', budget=30, prompt_version='v1', metadata=None, review=False, status=False, verify=False, plan=False, skills=(), gate2=False, gate3=False, gate4=False, tool_hints='off', gate5=False, gate6=False, answer_state=False, segment_pair=False, progressive_tools=False, t3_semantic_bridge=False):
+def run_session(toolbox, planner, recorder, task='T1.1xC0', budget=30, prompt_version='v1', metadata=None, review=False, status=False, verify=False, plan=False, skills=(), gate2=False, gate3=False, gate4=False, tool_hints='off', gate5=False, gate6=False, answer_state=False, segment_pair=False, progressive_tools=False, t3_semantic_bridge=False, explicit_answer=False, sam3_semantic=False):
     session = toolbox.session
     if t3_semantic_bridge:
         toolbox.t3_semantic_bridge = True
@@ -126,6 +126,16 @@ def run_session(toolbox, planner, recorder, task='T1.1xC0', budget=30, prompt_ve
         toolbox.segment_pair = True
         metadata = copy.deepcopy(metadata or {})
         metadata.setdefault('backends', {})['segment_pair'] = True
+    if sam3_semantic or toolbox.sam3_semantic:
+        toolbox.sam3_semantic = True
+        metadata = copy.deepcopy(metadata or {})
+        metadata.setdefault('backends', {})['sam3_semantic'] = True
+    if explicit_answer or toolbox.explicit_answer:
+        toolbox.explicit_answer = True
+        toolbox.answer_state = True
+        metadata = copy.deepcopy(metadata or {})
+        metadata.setdefault('backends', {})['explicit_answer'] = True
+        metadata.setdefault('backends', {})['answer_state'] = True
     if answer_state or toolbox.answer_state:
         toolbox.answer_state = True
         metadata = copy.deepcopy(metadata or {})
@@ -159,7 +169,7 @@ def run_session(toolbox, planner, recorder, task='T1.1xC0', budget=30, prompt_ve
     previous_calls = None
     reason, error = 'budget', None
     reviewed = not (review or verify)
-    schemas = [*tool_module.session_schemas(session, toolbox.python_enabled, toolbox.tools_t13, tool_hints, gate5=gate5, answer_state=toolbox.answer_state, segment_pair=toolbox.segment_pair, t3_semantic_bridge=toolbox.t3_semantic_bridge, missed_candidates=toolbox.missed_provider is not None), *([PLAN_SCHEMA] if plan else []), *([SKILL_SCHEMA] if skills else [])]
+    schemas = [*tool_module.session_schemas(session, toolbox.python_enabled, toolbox.tools_t13, tool_hints, gate5=gate5, answer_state=toolbox.answer_state, segment_pair=toolbox.segment_pair, t3_semantic_bridge=toolbox.t3_semantic_bridge, missed_candidates=toolbox.missed_provider is not None, sam3_semantic=toolbox.sam3_semantic, explicit_answer=toolbox.explicit_answer), *([PLAN_SCHEMA] if plan else []), *([SKILL_SCHEMA] if skills else [])]
     generated_calls = []
     toolbox.skills = tuple(skills)
     messages = []
@@ -316,7 +326,7 @@ def run_session(toolbox, planner, recorder, task='T1.1xC0', budget=30, prompt_ve
                     current_before=before, current_after=session.current_mask, cache_hit=internal.get('cache_hit'),
                     backend_seconds=internal.get('backend_seconds', 0.), seconds=internal.get('seconds', 0.),
                     status=internal.get('status', 'executed'), provenance=internal,
-                    set_current=args.get('set_current', True) if isinstance(args, dict) and name in
+                    set_current=args.get('set_current', not toolbox.explicit_answer) if isinstance(args, dict) and name in
                         ('to_mask','combine','morph','remove_region','add_region','refine_region','python') else None))
                 if gate4:
                     generated_calls.append(call_records[-1])
