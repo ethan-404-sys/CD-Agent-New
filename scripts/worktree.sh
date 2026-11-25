@@ -27,20 +27,48 @@ case "$cmd" in
         else
             git -C "$REPO" worktree add -b "$branch" "$target" main
         fi
-        for dir in models datasets third_party outputs; do
-            rm -rf "$target/$dir"
-            ln -s "$REPO/$dir" "$target/$dir"
+        # Keep tracked README.md files intact in models/, datasets/, outputs/ so git status stays clean.
+        for dir in models datasets outputs; do
+            mkdir -p "$target/$dir"
+            for item in "$REPO/$dir"/*; do
+                [[ -e "$item" || -L "$item" ]] || continue
+                base="$(basename "$item")"
+                [[ "$base" == "README.md" ]] && continue
+                rm -rf "$target/$dir/$base"
+                ln -s "$item" "$target/$dir/$base"
+            done
         done
+        rm -rf "$target/third_party"
+        ln -s "$REPO/third_party" "$target/third_party"
         mkdir -p "$target/.runtime"
         echo "Worktree ready: $target (branch=$branch)"
-        echo "Linked shared dirs: models, datasets, third_party, outputs -> $REPO"
+        echo "Linked shared entries: models/*, datasets/*, outputs/*, third_party -> $REPO"
         ;;
     remove)
         name="${2:?Missing worktree name}"
         target="$WT_ROOT/$name"
-        for dir in models datasets third_party outputs; do
-            [[ -L "$target/$dir" ]] && rm -f "$target/$dir"
+        # Refuse to silently drop real non-symlink outputs created only inside this worktree
+        if [[ -d "$target/outputs" && ! -L "$target/outputs" ]]; then
+            for item in "$target/outputs"/*; do
+                [[ -e "$item" || -L "$item" ]] || continue
+                base="$(basename "$item")"
+                [[ "$base" == "README.md" ]] && continue
+                if [[ ! -L "$item" ]]; then
+                    echo "Refusing to remove worktree: real output exists at $item; move it into $REPO/outputs/ first." >&2
+                    exit 1
+                fi
+            done
+        fi
+        for dir in models datasets outputs; do
+            if [[ -L "$target/$dir" ]]; then
+                rm -f "$target/$dir"
+            elif [[ -d "$target/$dir" ]]; then
+                for item in "$target/$dir"/*; do
+                    [[ -L "$item" ]] && rm -f "$item"
+                done
+            fi
         done
+        [[ -L "$target/third_party" ]] && rm -f "$target/third_party"
         git -C "$REPO" worktree remove "$target"
         git -C "$REPO" worktree prune
         echo "Removed worktree: $target"

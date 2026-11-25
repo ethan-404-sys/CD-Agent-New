@@ -1,7 +1,8 @@
 # Default repo-relative paths for CD-Agent.
 # Override via environment variables (CD_AGENT_MODELS, CD_AGENT_DATASETS, CD_AGENT_OUTPUTS,
 # CD_AGENT_RUNTIME, CD_AGENT_THIRD_PARTY) when running across different machines or jobs.
-account_root: /guisongxia01/pangchao/wangyihan
+workspace_root: /guisongxia02/pangchao/wangyihan
+account_root: /guisongxia01/pangchao/wangyihan  # existing conda_envs, .local/bin, and read-only models/datasets
 models_dir: models
 datasets_dir: datasets
 outputs_dir: outputs

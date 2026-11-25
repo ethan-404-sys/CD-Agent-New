@@ -1,6 +1,6 @@
 # CD-Agent 协作与执行规范
 
-本文件是 `/guisongxia01/pangchao/wangyihan/CD-Agent` 仓库的协作入口，适用于本仓库及其子目录。以下路径均相对于本仓库根目录。
+本文件是 `/guisongxia02/pangchao/wangyihan/CD-Agent` 仓库的协作入口，适用于本仓库及其子目录。以下路径均相对于本仓库根目录。
 
 ## 1. 单包结构与代码放置规范
 - **唯一状态入口**：开工前先读 `docs/CURRENT_STATE.md`，将其作为架构边界、任务定义与阶段路线的唯一真相源。
@@ -16,7 +16,7 @@
   - `experiments/<track>/`：按研究方向组织的实验入口与 Slurm 脚本（`t3_visual_ref/`、`multimodal_probe/`、`verifier_init_masks/`、`verifier_diag/`、`closed_loop/`）；禁止把一次性实验/分析脚本塞进 `src/cd_agent/`。
   - `scripts/`：长期复用的基础设施脚本（浏览器核验等；旧 `exp_loop/` 已由全局 `expctl` 替代，不再新增依赖）。
   - `configs/`：路径与实验配置 YAML。
-- **共享模型与数据**：所有模型和数据集通过本仓库 `models/`、`datasets/` 下的软链接统一指向 `/guisongxia01/pangchao/wangyihan/models` 与 `/guisongxia01/pangchao/wangyihan/datasets`；代码中统一经由 `cd_agent.paths` 或环境变量解析，禁止新增硬编码绝对路径。
+- **共享模型与数据**：所有模型和数据集通过本仓库 `models/`、`datasets/` 下的软链接统一接入（既有只读资产指向 `/guisongxia01/pangchao/wangyihan/{models,datasets}`，新增大数据与新权重存放于 `/guisongxia02/pangchao/wangyihan/{models,datasets}`；既有 `conda_envs/` 与 `.local/bin/` 留在 `/guisongxia01/pangchao/wangyihan/` 复用）；代码中统一经由 `cd_agent.paths` 或环境变量解析，禁止新增硬编码绝对路径。
 - **轻量验证门禁（提交代码 / 跑正式实验前必过）**：
   - 仓库结构与卫生门禁：`python -B scripts/verify_repo.py`（检查单包边界、无硬编码路径、无违规追踪产物、软链接与核心导入）。
   - 科研不变式与交付契约：`src/cd_agent/verify.py`（推理输入 GT 隔离 `EpisodeInput`、划分防泄露 `check_split_isolation`、诊断标签集合公理 `check_diagnostic_labels`、产物目录校验 `python -m cd_agent.verify run <run_dir>`）。
@@ -36,7 +36,7 @@
 - **Git 卫生（硬约束）**：
   - 严禁把 `outputs/`、`.runtime/`、`third_party/`、`models/`、`datasets/`、图像、掩码、`.npz`、模型权重或 Slurm 日志提交进 Git。
   - 严禁自动脚本执行无过滤的 `git add .` 提交实验产物。
-  - 日常以 `main` 为唯一稳定主干；仅在多人/多 Agent 并行改代码时开短期特性分支，合并后立即清理分支和 worktree；纯跑实验不开新分支。
+  - 日常以 `main` 为唯一稳定主干；仅在多人/多会话并行改代码时通过 `bash scripts/worktree.sh create <name> [branch]` 切出临时特性 worktree（实验脚本放入各自 `experiments/<track>/` 与 `tests/`，尽量不改公共核心 `loop_json.py`/`tools.py`/`planner.py`，若必须修改则验收后当轮立刻合回 `main`），阶段里程碑验收通过即 `rebase main` + `merge --ff-only` 并执行 `bash scripts/worktree.sh remove <name>` 清理，不长期挂空/未合并 worktree；纯跑实验不开新分支。
   - 严禁 `git push --force`，严禁在分析、报告和产物中写哈希和 SHA-256，严禁将评测 GT 泄露进 Planner/Verifier 的在线推理上下文。
   - 提交身份：`ethan-404-sys` / `345240447+ethan-404-sys@users.noreply.github.com`；GitHub 操作使用 `/guisongxia01/pangchao/wangyihan/.local/bin/wangyihan-git`。
 
